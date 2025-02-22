@@ -1,0 +1,21 @@
+#!/bin/bash
+
+##################################################
+# Launcher for bashtail-bin using config in /etc #
+##################################################
+
+# Load configuration
+source /etc/default/bashtail
+
+# Process log by log
+for LOG_FILE in ${LOG_FILES[@]}; do
+  bashtail-bin \
+  --lokiurl=${LOKI_URL} \
+  --lokiport=${LOKI_PORT} \
+  --lokiapiurl=${LOKI_API_URL} \
+  --timeout=${CURL_TIMEOUT} \
+  --filename=${LOG_FILE} \
+  --instance=${INSTANCE} \
+  --archive-dir=${ARCHIVE_DIR} \
+  --retention-days=${RETENTION_DAYS}
+done

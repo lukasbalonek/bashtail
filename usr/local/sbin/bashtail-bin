@@ -1,0 +1,127 @@
+#!/bin/bash
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+# --- DEFAULT VALUES
+
+DEFAULT_LOKI_PORT=3100
+DEFAULT_LOKI_API_URL="/loki/api/v1/push"
+DEFAULT_CURL_TIMEOUT=30
+DEFAULT_ARCHIVE_DIR="/var/log/bashtail"
+DEFAULT_RETENTION_DAYS=90
+
+# --- FUNCTIONS
+
+# To get value from arg
+function getarg {
+  echo $arg | cut -d "=" -f2
+}
+
+# Error thrower
+function problem {
+  case $1 in
+    empty)
+      echo -e "\e[31m${ERR_MSG} not specified !\e[m"
+      $0 --help
+      exit 10
+    ;;
+  esac
+}
+
+# --- ARG PROCESSING
+
+for arg in $@; do
+  case $arg in
+    --lokiurl=*) LOKI_URL=$(getarg) ;;
+    --lokiport=*) LOKI_PORT=$(getarg) ;;
+    --lokiapiurl=*) LOKI_API_URL=$(getarg) ;;
+    --timeout=*) CURL_TIMEOUT=$(getarg) ;;
+    --filename=*) FILENAME=$(getarg) ;;
+    --instance=*) INSTANCE=$(getarg) ;;
+    --archive-dir=*) ARCHIVE_DIR=$(getarg) ;;
+    --retention-days=*) RETENTION_DAYS=$(getarg) ;;
+    --help)
+      declare -i TERMINAL_WIDTH=$(stty -a | grep -Po '(?<=columns )\d+')
+      for i in $(eval echo {1..$TERMINAL_WIDTH}); do echo -n '-'; done
+      echo -e "\e[1m\nshtail is a BASH script to send data to Loki (https://grafana.com/oss/loki/) via it's API"
+      echo -e "\e[1mUsage:\e[m $0"
+      echo -e "\e[1m--lokiurl=\e[m<URL of your Loki instance, for example: http://loki.myorg.com>"
+      echo -e "\e[1m--lokiport=\e[m<PORT to your Loki instance, default is: $DEFAULT_LOKI_PORT>"
+      echo -e "\e[1m--lokiapiurl=\e[m<(Optional) API URL of your Loki instance to send data, default is $DEFAULT_LOKI_API_URL>"
+      echo -e "\e[1m--timeout=\e[m<(Optional) Timeout in seconds to send data to Loki, default is $DEFAULT_CURL_TIMEOUT>"
+      echo -e "\e[1m--filename=\e[m<Path to your log in JSON format>"
+      echo -e "\e[1m--instance=\e[m<Name of your instance, for example $(hostname -s)>"
+      echo -e "\e[1m--archive-dir=\e[m<(Optional) Path where to store old log archives, default is: $DEFAULT_ARCHIVE_DIR>"
+      echo -e "\e[1m--retention-days=\e[m<(Optional) How old logs in days should we keep, default is: $DEFAULT_RETENTION_DAYS>"
+      for i in $(eval echo {1..$TERMINAL_WIDTH}); do echo -n '-'; done
+      echo
+      exit 0
+    ;;
+  esac
+done
+
+# --- VARIABLES CHECK
+
+if [[ -z ${LOKI_URL} ]];  then ERR_MSG="--lokiurl"  ; problem empty; fi
+if [[ -z ${LOKI_PORT} ]]; then LOKI_PORT=$DEFAULT_LOKI_PORT; fi
+if [[ -z ${LOKI_API_URL} ]]; then LOKI_API_URL=$DEFAULT_LOKI_API_URL; fi
+if [[ -z ${CURL_TIMEOUT} ]]; then CURL_TIMEOUT=$DEFAULT_CURL_TIMEOUT; fi
+if [[ -z ${FILENAME} ]];  then ERR_MSG="--filename" ; problem empty; fi
+if [[ -z ${INSTANCE} ]];  then ERR_MSG="--instance" ; problem empty; fi
+if [[ -z ${ARCHIVE_DIR} ]]; then ARCHIVE_DIR=$DEFAULT_ARCHIVE_DIR; fi
+if [[ -z ${RETENTION_DAYS} ]]; then RETENTION_DAYS=$DEFAULT_RETENTION_DAYS; fi
+
+# --- START
+
+# Set full Loki URI
+LOKI_URI="${LOKI_URL}:${LOKI_PORT}${LOKI_API_URL}"
+
+# Set variable with the filename of the log
+FILENAME_BASENAME=$(basename "${FILENAME}")
+
+# Load file content and clear file
+LOG_CONTENT=$(cat "${FILENAME}")
+
+# Check if we got any logs
+if (( $(cat "${FILENAME}" | wc -l) < 1 )); then
+  echo -e "\e[33mFile:\e[m ${FILENAME}\e[33m is empty.\e[m"
+exit
+fi
+
+# Process log content line per line
+echo -e "\e[33mSending\e[m ${FILENAME}\e[33m to \e[m${LOKI_URI}"
+echo "${LOG_CONTENT}" | while read LOG_LINE; do
+
+  # Seconds since epoch: date +%s
+  NS_SINCE_UNIX_EPOCH=$(date +%s%N)
+
+  curl \
+    --silent \
+    --connect-timeout ${CURL_TIMEOUT} \
+    --header "Content-Type: application/json" \
+    -X POST "${LOKI_URI}" \
+    --data-raw '{"streams": [{ "stream": { "instance": "'"$INSTANCE"'", "job": "'"$FILENAME_BASENAME"'" },"values": [ [ "'"$NS_SINCE_UNIX_EPOCH"'", "'"$FILENAME_BASENAME"'", '"$LOG_LINE"' ] ] }]}'
+
+done
+
+# --- ARCHIVE OLD FILE
+
+# Current timestamp for file archive
+TIMESTAMP=$(date --iso-8601=seconds | tr : _)
+
+# Current directory where log exists
+LOG_DIR=$(dirname "${FILENAME}")
+
+# Name of the directory
+LOG_DIRNAME=$(basename ${LOG_DIR})
+
+# Archive log content and clear file
+mkdir -p "${ARCHIVE_DIR}/${LOG_DIRNAME}/${FILENAME_BASENAME}"
+tar czpf "${ARCHIVE_DIR}/${LOG_DIRNAME}/${FILENAME_BASENAME}/${TIMESTAMP}.tar.gz" \
+  -C "${LOG_DIR}" \
+  "${FILENAME_BASENAME}"
+[[ $? -eq 0 ]] && > "${FILENAME}"
+
+# Remove old log archives
+echo -e "\e[33mRemoving old log archives (if any)\e[m"
+find "${ARCHIVE_DIR}/${LOG_DIRNAME}" -name *.tar.gz -mtime +${RETENTION_DAYS} -print -delete

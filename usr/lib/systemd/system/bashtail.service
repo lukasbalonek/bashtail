@@ -1,0 +1,6 @@
+[Unit]
+Description=Periodically send logs to Loki
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bashtail

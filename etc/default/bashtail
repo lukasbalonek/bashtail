@@ -1,0 +1,25 @@
+# Set instance by this server hostname
+INSTANCE="$(hostname -A | cut -d ' ' -f1)"
+
+# Change THIS to your loki URL
+LOKI_URL="http://192.168.0.80"
+
+# This is default port, change if necessary
+LOKI_PORT=3100
+
+# API URL where Loki accepts logs
+LOKI_API_URL=/loki/api/v1/push
+
+# Timeout for curl to send data to Loki
+CURL_TIMEOUT=15
+
+# Target directory where we'll store archives
+ARCHIVE_DIR="/var/log/bashtail"
+
+# How many days should we keep old log archives
+RETENTION_DAYS=180
+
+# Specify array of log files that should be send
+LOG_FILES=(
+           "/var/log/nginx/*.log"
+          )

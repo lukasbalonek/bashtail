@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically send logs to Loki
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+OnUnitActiveSec=30
+AccuracySec=5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
